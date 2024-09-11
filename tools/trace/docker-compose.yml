@@ -9,6 +9,7 @@ services:
     tty: true
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
       
   alertmanger:
     container_name: milvus-alertmanager
@@ -96,3 +97,7 @@ services:
 networks:
   default:
     name: milvus
+
+volumes:
+  prometheus_data:
+    name: "my_prometheus_data"

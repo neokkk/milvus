@@ -1,5 +1,7 @@
 import os
 import sys
+user_site_packages = os.path.expanduser("/home/nk/.local/lib/python3.10/site-packages")
+sys.path.append(user_site_packages)
 #home_dir = os.environ.get("HOME")
 #sys.path.append("/usr/lib/python3/dist-packages")
 #sys.path.append("/usr/local/lib/python3.10/dist-packages")
@@ -82,15 +84,16 @@ def disconnect_prometheus():
         promSession.close()
 
 class Milvus(BaseANN):
-    def __init__(self, metric, dim, index_param, local, skip):
-        print("Milvus init local: ", local)
+    def __init__(self, metric, dim, index_param, args):
+        print("Milvus init local: ", args.local)
         self._metric = metric
         self._dim = dim
-        self.local = local
-        self.skip = skip
+        self.limit = args.limit
+        self.local = args.local
+        self.skip = args.skip
         self._metric_type = metric_mapping(self._metric)
         connect_prometheus()
-        if skip:
+        if args.skip:
             pid = get_pid("milvus")
             process = namedtuple("process", ["pid"])
             self.p = process(pid)
@@ -123,6 +126,7 @@ class Milvus(BaseANN):
                 home_path = "/home/nk"
                 milvus_path = f"{home_path}/milvus"
                 milvus_binpath = f"{milvus_path}/bin/milvus"
+                cgroup_procs_path = f"/sys/fs/cgroup/milvus/cgroup.procs"
                 env = os.environ.copy()
                 ld_path = f"{milvus_path}/internal/core/output/lib:lib"
                 print("ld_path: ", ld_path)
@@ -131,6 +135,10 @@ class Milvus(BaseANN):
                     process = subprocess.Popen([milvus_binpath, "run", "standalone"], env=env, stdout=devnull, stderr=devnull, text=True)
                     # process = subprocess.Popen([milvus_binpath, "run", "standalone"], env=env, stdout=sys.stdout, stderr=sys.stderr, text=True)
                     self.p = process
+                    if self.limit:
+                        with open(cgroup_procs_path, "w") as c:
+                            print(f"process {process.pid} is in {cgroup_procs_path}")
+                            c.write(str(process.pid))
                     print(f"PID: {process.pid}")
             else:
                 os.system("docker compose down")
@@ -248,8 +256,8 @@ class Milvus(BaseANN):
         disconnect_prometheus()
 
 class MilvusFLAT(Milvus):
-    def __init__(self, metric, dim, index_param, local, skip):
-        super().__init__(metric, dim, index_param, local, skip)
+    def __init__(self, metric, dim, index_param, args):
+        super().__init__(metric, dim, index_param, args)
         self.name = f"MilvusFLAT metric:{self._metric}"
 
     def get_index_param(self):
@@ -273,8 +281,8 @@ class MilvusFLAT(Milvus):
         return ids
 
 class MilvusIVFFLAT(Milvus):
-    def __init__(self, metric, dim, index_param, local, skip):
-        super().__init__(metric, dim, index_param, local, skip)
+    def __init__(self, metric, dim, index_param, args):
+        super().__init__(metric, dim, index_param, args)
         self._index_nlist = index_param.get("nlist", None)
 
     def get_index_param(self):
@@ -294,8 +302,8 @@ class MilvusIVFFLAT(Milvus):
         self.name = f"MilvusIVFFLAT metric:{self._metric}, index_nlist:{self._index_nlist}, search_nprobe:{nprobe}"
 
 class MilvusIVFSQ8(Milvus):
-    def __init__(self, metric, dim, index_param, local, skip):
-        super().__init__(metric, dim, index_param, local, skip)
+    def __init__(self, metric, dim, index_param, args):
+        super().__init__(metric, dim, index_param, args)
         self._index_nlist = index_param.get("nlist", None)
 
     def get_index_param(self):
@@ -315,8 +323,8 @@ class MilvusIVFSQ8(Milvus):
         self.name = f"MilvusIVFSQ8 metric:{self._metric}, index_nlist:{self._index_nlist}, search_nprobe:{nprobe}"
 
 class MilvusIVFPQ(Milvus):
-    def __init__(self, metric, dim, index_param, local, skip):
-        super().__init__(metric, dim, index_param, local, skip)
+    def __init__(self, metric, dim, index_param, args):
+        super().__init__(metric, dim, index_param, args)
         self._index_nlist = index_param.get("nlist", None)
         self._index_m = index_param.get("m", None)
         self._index_nbits = index_param.get("nbits", None)
@@ -341,8 +349,8 @@ class MilvusIVFPQ(Milvus):
         self.name = f"MilvusIVFPQ metric:{self._metric}, index_nlist:{self._index_nlist}, search_nprobe:{nprobe}"
 
 class MilvusHNSW(Milvus):
-    def __init__(self, metric, dim, index_param, local=True, skip=False):
-        super().__init__(metric, dim, index_param, local, skip)
+    def __init__(self, metric, dim, index_param, args):
+        super().__init__(metric, dim, index_param, args)
         print("self.local: ", self.local)
         self._index_m = index_param.get("M", None)
         self._index_ef = index_param.get("efConstruction", None)
@@ -366,8 +374,8 @@ class MilvusHNSW(Milvus):
         self.name = f"MilvusHNSW metric:{self._metric}, index_M:{self._index_m}, index_ef:{self._index_ef}, search_ef={ef}"
 
 class MilvusSCANN(Milvus):
-    def __init__(self, metric, dim, index_param, local, skip):
-        super().__init__(metric, dim, index_param, local, skip)
+    def __init__(self, metric, dim, index_param, args):
+        super().__init__(metric, dim, index_param, args)
         self._index_nlist = index_param.get("nlist", None)
 
     def get_index_param(self):
@@ -385,6 +393,24 @@ class MilvusSCANN(Milvus):
             "params": {"nprobe": nprobe}
         }
         self.name = f"MilvusSCANN metric:{self._metric}, index_nlist:{self._index_nlist}, search_nprobe:{nprobe}"
+
+class MilvusDiskANN(Milvus):
+    def __init__(self, metric, dim, index_param, args):
+        super().__init__(metric, dim, index_param, args)
+
+    def get_index_param(self):
+        return {
+            "index_type": "DISKANN",
+            "params": {},
+            "metric_type": self._metric_type,
+        }
+
+    def set_query_arguments(self, search_list):
+        self.search_params = {
+            "metric_type": self._metric_type,
+            "params": {"search_list": search_list},
+        }
+        self.name = f"MilvusDiskANN metric:{self._metric}, search_list:{search_list}"
 
 INDICES = {
     "flat": {
@@ -431,7 +457,12 @@ INDICES = {
             "nlist": [64, 128, 256, 512, 1024, 2048, 4096, 8192],
         },
         "query_args": [[1, 10, 20, 30, 50]],
-    }
+    },
+    "diskann": {
+        "constructor": MilvusDiskANN,
+        "args": None,
+        "query_args": [70],
+    },
 }
 
 def jaccard(a: List[int], b: List[int]) -> float:
@@ -563,10 +594,10 @@ def store_results(dataset: str, count: int, attrs, results):
             neighbors[i] = [n for n, d in ds] + [-1] * (count - len(ds))
             distances[i] = [d for n, d in ds] + [float("inf")] * (count - len(ds))
 
-def run(a):
+def run(args):
     start_time = time.time()
-    print(a)
-    D, dimension = get_dataset(a.dataset)
+    print(args)
+    D, dimension = get_dataset(args.dataset)
     print(D)
     X_train = np.array(D["train"])
     X_test = np.array(D["test"])
@@ -578,16 +609,16 @@ def run(a):
     print(f"distance: {distance}")
     X_train, X_test = dataset_transform(D)
 
-    print(f"index: {a.index}")
-    index = INDICES.get(a.index)
+    print(f"index: {args.index}")
+    index = INDICES.get(args.index)
     print(index)
     if index is None:
         raise Exception("Not support index")
     
-    args = index.get("args")
-    query_args = index.get("query_args")
+    index_params = index.get("args")
+    index_query_params = index.get("query_args")
 
-    algo = index.get("constructor")(metric=distance, dim=dimension, index_param=args, local=a.local, skip=a.skip)
+    algo = index.get("constructor")(metric=distance, dim=dimension, index_param=index_params, args=args)
  
     def sigint_handler(signum, frame):
         print("SIGINT captured ", frame)
@@ -603,10 +634,10 @@ def run(a):
 
     query_start_time = time.time()
 
-    if query_args:
-        algo.set_query_arguments(*query_args)
+    if index_query_params:
+        algo.set_query_arguments(*index_query_params)
     
-    descriptor, results = run_individual_query(algo, X_train, X_test, distance, a.count, a.runs)
+    descriptor, results = run_individual_query(algo, X_train, X_test, distance, args.count, args.runs)
     query_end_time = time.time()
     print(f"query time: {query_end_time - query_start_time}")
     
@@ -614,19 +645,28 @@ def run(a):
         "build_time": build_index_time,
         "index_size": index_size,
         "algo": algo,
-        "dataset": a.dataset,
+        "dataset": args.dataset,
     })
 
     # store_results(a.dataset, a.count, descriptor, results)
 
     algo.done()
 
+def check_sudo():
+    if os.geteuid() == 0:
+        print("Script is running with root privileges")
+    else:
+        print("Script is not running with root privileges")
+        sys.exit("This script requires sudo privileges. Please run with `sudo`")
+
 if __name__ == "__main__":
+    check_sudo()
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--dataset", default="sift-128-euclidean", choices=DATASETS.keys())
     parser.add_argument("-i", "--index", default="hnsw", choices=INDICES.keys())
     parser.add_argument("-k", "--count", default=10, help="the number of near neighbors to search for")
     parser.add_argument("-r", "--runs", default=1, help="run each algorithm instance")
+    parser.add_argument("--limit", action="store_true", default=False)
     parser.add_argument("--local", action="store_true", default=True)
     parser.add_argument("--skip", action="store_true", default=False)
     args = parser.parse_args()
