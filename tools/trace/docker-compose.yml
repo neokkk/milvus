@@ -4,7 +4,7 @@ services:
     image: prom/prometheus:latest
     network_mode: host
     command:
-      - "--config.file=/etc/prometheus/prometheus.yml --web.enable-admin-api"
+      - "--config.file=/etc/prometheus/prometheus.yml"
     stdin_open: true
     tty: true
     volumes:
